@@ -15,15 +15,12 @@
   (letE [x : Symbol] [e1 : Exp] [e2 : Exp])
   (lamE [x : Symbol] [e : Exp])
   (appE [e1 : Exp] [e2 : Exp])
-  (letrecE [x : Symbol] [e1 : Exp] [e2 : Exp]))
+  (letrecE [x : Symbol] [e1 : Exp] [e2 : Exp])
+  (symE [x : Symbol]))
 
-;(define (symbol=? a b)
-;  )
-(define (symbol? a)
-  (type-case
-     [(Symbol a) #t]
-     [else #f]
-  ))
+(define (s-exp->sym a )
+   (s-exp->symbol (second (s-exp->list a))))
+
 ;; parse ----------------------------------------
 
 (define (parse [s : S-Exp]) : Exp
@@ -39,6 +36,8 @@
      (ifE (parse (second (s-exp->list s)))
           (parse (third (s-exp->list s)))
           (parse (fourth (s-exp->list s))))]
+    [(s-exp-match? `'SYMBOL s)
+     (symE (s-exp->sym s))]
     [(s-exp-match? `SYMBOL s)
      (varE (s-exp->symbol s))]
     [(s-exp-match? `{let SYMBOL ANY ANY} s)
@@ -58,7 +57,7 @@
            (parse (second (s-exp->list s))))]
     [else (error 'parse "invalid input")]))
 
-(define prim-ops '(+ - * / = <=))
+(define prim-ops '(+ - * / = <= symbol=? symbol? number?))
 
 (define (parse-op [op : Symbol]) : Symbol
   (if (member op prim-ops)
@@ -85,12 +84,54 @@
   (test (parse `{double 9})
         (appE (varE 'double) (numE 9))))
 
+(define (op-num?->value ) : Value
+  (primopV
+   (lambda (v1)
+     (type-case Value v1
+       [(numV n1) (boolV #t)]
+       [else (boolV #f)]
+       )
+     )
+   )
+  )
+  
+
+(define (op-sym-bool->value )
+  (primopV
+   (lambda (v1)
+     (type-case Value v1
+       [(symV n1) (boolV #t)]
+       [else (boolV #f)]
+       )
+     )
+   )
+  )
+
+(define (op-sym-sym->value [f : (Symbol Symbol -> Boolean)]) : Value 
+  (primopV
+   (lambda (v1)
+     (type-case Value v1
+       [(symV n1)
+        (primopV
+         (lambda (v2)
+           (type-case Value v2
+             [(symV n2)
+              (boolV (f n1 n2))]
+             [else
+              (error 'eval "type error")])))]
+       [else
+        (error 'eval "type error")]))))
+
+
+(define (symbol=? [s1 : Symbol] [s2 : Symbol]) : Boolean
+  (equal? s1 s2))
 ;; eval --------------------------------------
 
 ;; values
 
 (define-type Value
   (numV [n : Number])
+  (symV [x : Symbol])
   (boolV [b : Boolean])
   (funV [x : Symbol] [e : Exp] [env : Env])
   (primopV [f : (Value -> Value)]))
@@ -117,7 +158,7 @@
 
 (define (find-var [env : Env] [x : Symbol]) : (Boxof Storable)
   (type-case (Listof Binding) env
-    [empty (error 'lookup "unbound variable")]
+    [empty 0(error 'lookup "unbound variable")]
     [(cons b rst-env) (cond
                         [(eq? x (bind-name b))
                          (bind-ref b)]
@@ -173,13 +214,17 @@
                (pair '* (op-num-num->value *))
                (pair '/ (op-num-num->value /))
                (pair '= (op-num-bool->value =))
-               (pair '<= (op-num-bool->value <=)))))
+               (pair '<= (op-num-bool->value <=))
+               (pair 'number? (op-num?->value))
+               (pair 'symbol? (op-sym-bool->value))
+               (pair 'symbol=? (op-sym-sym->value symbol=?)))))
 
 ;; evaluation function (eval/apply)
 
 (define (eval [e : Exp] [env : Env]) : Value
   (type-case Exp e
     [(numE n) (numV n)]
+    [(symE s) (symV s)]
     [(ifE b l r)
      (type-case Value (eval b env)
        [(boolV v)
@@ -235,6 +280,7 @@
         (numV 7))
   (test (run `{{lambda {x} {+ x 1}} 5})
         (numV 6))
+  (test (run `{symbol=? 'a 'b}) (boolV #f) )
   (test (run `{letrec fact {lambda {n}
                              {if {= n 0}
                                  1
@@ -249,7 +295,8 @@
     [(numV n) (to-string n)]
     [(boolV b) (if b "true" "false")]
     [(funV x e env) "#<procedure>"]
-    [(primopV f) "#<primop>"]))
+    [(primopV f) "#<primop>"]
+    [(symV s) (to-string s)]))
 
 (define (print-value [v : Value]) : Void
   (display (value->string v)))
